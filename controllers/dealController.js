@@ -1,4 +1,6 @@
+
 const Deal = require("../models/Deal");
+const mongoose = require("mongoose");
 
 // ---------- helpers ----------
 const userIdOf = (req) => req.user.id || req.user._id;
@@ -58,22 +60,36 @@ const dealToJson = (d) => ({
 // ---------- controllers ----------
 
 // POST /api/deals/create
+// POST /api/deals/create
 exports.createDeal = async (req, res, next) => {
   try {
-    const { title, description, budget, timeline, category } = req.body;
-    if (!title || !description || !budget) {
-      return res.status(400).json({ message: "title, description and budget are required" });
+    const title = req.body.title;
+    const description = req.body.description;
+    const budget = Number(req.body.budget ?? req.body.amount); // accept budget OR amount
+
+    // ROLE PRIORITY FIX: the dashboard's explicit role WINS over the saved
+    // user default (your User model defaults everyone to "buyer").
+    const creatorRole =
+      req.body.role ||
+      (req.user && req.user.role) ||
+      (req.body.dealType === "service" ? "seller" : null) ||
+      (req.body.dealType === "request" ? "buyer" : null);
+
+    const missing = [];
+    if (!title) missing.push("title");
+    if (!description) missing.push("description");
+    if (!budget || budget < 1) missing.push("budget (or amount)");
+    if (!["buyer", "seller"].includes(creatorRole)) missing.push("role (buyer/seller)");
+    if (missing.length) {
+      return res.status(400).json({ message: `Missing required fields: ${missing.join(", ")}` });
     }
-    const creatorRole = (req.user && req.user.role) || req.body.role;
-    if (!["buyer", "seller"].includes(creatorRole)) {
-      return res.status(400).json({ message: "User role missing — cannot determine deal type" });
-    }
+
     const deal = await Deal.create({
       title,
       description,
-      budget: Number(budget),
-      timeline: timeline || "",
-      category: category || "Other",
+      budget,
+      timeline: req.body.timeline || "",
+      category: req.body.category || "Other",
       dealType: creatorRole === "seller" ? "service" : "request",
       creator: userIdOf(req),
       creatorRole,
@@ -107,6 +123,9 @@ exports.getDeals = async (req, res, next) => {
 // GET /api/deals/:id
 exports.getDealById = async (req, res, next) => {
   try {
+       if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: "Deal not found" });
+    }
     const deal = await loadDeal(req.params.id);
     if (deal.status !== "open" && !isParticipant(deal, userIdOf(req))) {
       return res.status(403).json({ message: "You are not a participant in this deal" });
@@ -118,6 +137,7 @@ exports.getDealById = async (req, res, next) => {
 // PUT /api/deals/:id/accept
 exports.acceptDeal = async (req, res, next) => {
   try {
+    
     const deal = await loadDeal(req.params.id);
     const uid = userIdOf(req);
     if (deal.status !== "open") return res.status(400).json({ message: "Deal is not open" });
