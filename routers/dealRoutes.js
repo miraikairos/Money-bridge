@@ -23,6 +23,13 @@ const upload = require("../middleware/upload");
 
 router.post("/create", protect, upload.single("file"), createDeal);
 router.get("/", protect, getDeals);
+
+// GET /api/deals/mine — my deals (MUST be above /:id)
+router.get("/mine", protect, (req, res, next) => {
+  req.query.scope = "mine";
+  getDeals(req, res, next);
+});
+
 router.get("/:id", protect, getDealById);
 
 router.put("/:id/accept", protect, acceptDeal);
